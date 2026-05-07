@@ -417,157 +417,131 @@ function Panel({ children, style }: { children: React.ReactNode; style?: React.C
   );
 }
 
-// ── Speech Test component ─────────────────────────────────────────────────────
+// ── Speech Test modal ─────────────────────────────────────────────────────────
 
-function SpeechTest({
-  phase, countdown, progress, volumeDb, result, history, onStart, onReset,
+function TestModal({
+  phase, countdown, progress, volumeDb, result, onClose, onRetry,
 }: {
   phase: TestPhase;
   countdown: number;
   progress: number;
   volumeDb: number;
   result: TestResult | null;
-  history: TestResult[];
-  onStart: () => void;
-  onReset: () => void;
+  onClose: () => void;
+  onRetry: () => void;
 }) {
   const levelPct = dbToPercent(volumeDb);
 
-  if (phase === "countdown") {
-    return (
-      <Panel>
-        <div style={{ marginBottom: 14 }}>
-          <SectionLabel tooltip="A 10-second timed test that captures your mic metrics while you speak, then saves a scored result.">Speech Test</SectionLabel>
-        </div>
-        <div style={{ textAlign: "center", padding: "20px 0" }}>
-          <div style={{ fontSize: 80, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: C.yellow }}>{countdown}</div>
-          <div style={{ fontSize: 10, color: C.dim, marginTop: 10, fontFamily: MONO, letterSpacing: "0.25em" }}>GET READY TO SPEAK</div>
-        </div>
-      </Panel>
-    );
-  }
+  const header = (title: string) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, letterSpacing: "0.25em", textTransform: "uppercase", fontWeight: 700 }}>
+        {title}
+      </div>
+      <button
+        onClick={onClose}
+        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, color: C.fg, padding: "0 2px", fontFamily: SANS }}
+        aria-label="Close"
+      >
+        ✕
+      </button>
+    </div>
+  );
 
-  if (phase === "recording") {
-    return (
-      <Panel>
-        <div style={{ marginBottom: 14 }}>
-          <SectionLabel tooltip="Speak naturally for 10 seconds. The test captures SNR, speech band energy, dynamic range, and noise floor.">
-            Speech Test — Recording
-          </SectionLabel>
+  let content: React.ReactNode;
+
+  if (phase === "countdown") {
+    content = (
+      <>
+        {header("Speech Test")}
+        <div style={{ textAlign: "center", padding: "32px 0 24px" }}>
+          <div style={{ fontSize: 96, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: C.yellow }}>{countdown}</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 14, fontFamily: MONO, letterSpacing: "0.3em" }}>GET READY TO SPEAK</div>
         </div>
-        <div style={{ fontSize: 11, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginBottom: 12 }}>
+      </>
+    );
+  } else if (phase === "recording") {
+    content = (
+      <>
+        {header("Recording")}
+        <div style={{ fontSize: 12, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginBottom: 16 }}>
           Speak naturally in your normal voice...
         </div>
-        <div style={{ height: 4, background: C.dim2, marginBottom: 10 }}>
+        <div style={{ height: 6, background: C.dim2, marginBottom: 16 }}>
           <div style={{ height: "100%", width: `${progress}%`, background: C.yellow, transition: "width 0.05s" }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, flexShrink: 0 }}>Level</div>
-          <div style={{ flex: 1, height: 8, background: C.dim2 }}>
+          <div style={{ flex: 1, height: 10, background: C.dim2 }}>
             <div style={{ height: "100%", width: `${levelPct}%`, background: C.fg, transition: "width 0.04s" }} />
           </div>
-          <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, flexShrink: 0 }}>{Math.round(progress)}%</div>
+          <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, flexShrink: 0, minWidth: 28, textAlign: "right" }}>{Math.round(progress)}%</div>
         </div>
-      </Panel>
+      </>
     );
-  }
-
-  if (phase === "done" && result) {
+  } else if (phase === "done" && result) {
     const g = scoreGrade(result.score);
     const noiseRating = result.noiseFloorDb < -45 ? { label: "GOOD", color: C.green }
       : result.noiseFloorDb < -35 ? { label: "FAIR", color: "#b35c00" }
       : { label: "POOR", color: C.red };
-
     const rows: { label: string; value: string; color: string }[] = [
-      { label: "SNR",           value: `${result.snr.toFixed(1)} dB`,                    color: ratingLabel(result.snr).color },
-      { label: "Speech Band",   value: `${(result.speechBandRatio * 100).toFixed(1)}%`,  color: speechBandLabel(result.speechBandRatio).color },
-      { label: "Dynamic Range", value: `${result.dynamicRangeDb.toFixed(1)} dB`,         color: dynamicRangeLabel(result.dynamicRangeDb).color },
-      { label: "Noise Floor",   value: `${result.noiseFloorDb.toFixed(1)} dB`,           color: noiseRating.color },
-      { label: "Speech Activity", value: `${result.speechActivityPct.toFixed(0)}%`,      color: C.dim },
+      { label: "SNR",            value: `${result.snr.toFixed(1)} dB`,                   color: ratingLabel(result.snr).color },
+      { label: "Speech Band",    value: `${(result.speechBandRatio * 100).toFixed(1)}%`, color: speechBandLabel(result.speechBandRatio).color },
+      { label: "Dynamic Range",  value: `${result.dynamicRangeDb.toFixed(1)} dB`,        color: dynamicRangeLabel(result.dynamicRangeDb).color },
+      { label: "Noise Floor",    value: `${result.noiseFloorDb.toFixed(1)} dB`,          color: noiseRating.color },
+      { label: "Speech Activity",value: `${result.speechActivityPct.toFixed(0)}%`,       color: C.dim },
     ];
-
-    return (
-      <Panel>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-          <SectionLabel tooltip="Your mic's dictation readiness score, based on SNR, speech band energy, dynamic range, and noise floor.">
-            Speech Test Result
-          </SectionLabel>
-          <button
-            onClick={onReset}
-            style={{ fontFamily: MONO, fontSize: 10, border: `2px solid ${C.fg}`, padding: "4px 10px", background: "transparent", cursor: "pointer", letterSpacing: "0.1em", textTransform: "uppercase" }}
-          >
-            Test again
-          </button>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginBottom: 16 }}>
-          <span style={{ fontSize: 72, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: g.color }}>{g.grade}</span>
+    content = (
+      <>
+        {header("Result")}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginBottom: 20 }}>
+          <span style={{ fontSize: 80, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: g.color }}>{g.grade}</span>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: g.color, fontFamily: MONO }}>{result.score}<span style={{ fontSize: 11, fontWeight: 400 }}>/100</span></div>
-            <div style={{ fontSize: 11, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginTop: 2 }}>{g.label}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: g.color, fontFamily: MONO }}>
+              {result.score}<span style={{ fontSize: 12, fontWeight: 400 }}>/100</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginTop: 3 }}>{g.label}</div>
           </div>
         </div>
 
         {rows.map(({ label, value, color }) => (
-          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: `1px solid ${C.dim2}` }}>
+          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderTop: `1px solid ${C.dim2}` }}>
             <span style={{ fontSize: 10, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</span>
-            <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <span style={{ fontSize: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{value}</span>
-              <span style={{ fontSize: 10, fontFamily: MONO, color, letterSpacing: "0.05em", minWidth: 52, textAlign: "right" }}>
-                {label === "Speech Activity" || label === "Noise Floor" ? "" : color === C.green ? "GOOD" : color === "#4a7c00" ? "GOOD" : color === "#b35c00" ? "FAIR" : "POOR"}
-              </span>
+              {label !== "Speech Activity" && (
+                <span style={{ fontSize: 10, fontFamily: MONO, color, minWidth: 56, textAlign: "right", letterSpacing: "0.05em" }}>
+                  {color === C.green || color === "#4a7c00" ? "GOOD" : color === "#b35c00" ? "FAIR" : "POOR"}
+                </span>
+              )}
             </div>
           </div>
         ))}
 
-        <div style={{ marginTop: 10, fontSize: 10, color: C.dim, fontFamily: MONO }}>
+        <div style={{ marginTop: 16, fontSize: 10, color: C.dim, fontFamily: MONO }}>
           {new Date(result.timestamp).toLocaleString()}
         </div>
-      </Panel>
+
+        <button
+          onClick={onRetry}
+          style={{ marginTop: 16, width: "100%", padding: "10px", fontSize: 11, fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", border: `2px solid ${C.fg}`, background: "transparent", color: C.fg, cursor: "pointer", fontFamily: MONO }}
+        >
+          Test Again
+        </button>
+      </>
     );
   }
 
-  // idle
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <button
-        onClick={onStart}
-        style={{
-          padding: "12px",
-          fontSize: 12,
-          fontWeight: 700,
-          letterSpacing: "0.15em",
-          textTransform: "uppercase",
-          border: `2px solid ${C.fg}`,
-          background: "transparent",
-          color: C.fg,
-          cursor: "pointer",
-          fontFamily: MONO,
-          width: "100%",
-        }}
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 24 }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: C.bg, border: `2px solid ${C.fg}`, width: "100%", maxWidth: 440, padding: 24 }}
+        onClick={(e) => e.stopPropagation()}
       >
-        Run Speech Test
-      </button>
-
-      {history.length > 0 && (
-        <Panel>
-          <div style={{ marginBottom: 10 }}>
-            <SectionLabel tooltip="Saved results from previous speech tests. Up to 20 results are stored in your browser.">Past Results</SectionLabel>
-          </div>
-          {history.slice(0, 5).map((r) => {
-            const g = scoreGrade(r.score);
-            return (
-              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderTop: `1px solid ${C.dim2}` }}>
-                <span style={{ fontSize: 10, color: C.dim, fontFamily: MONO }}>{new Date(r.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: C.dim }}>{r.score}/100</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: SANS, color: g.color, minWidth: 16, textAlign: "center" }}>{g.grade}</span>
-                </div>
-              </div>
-            );
-          })}
-        </Panel>
-      )}
+        {content}
+      </div>
     </div>
   );
 }
@@ -852,6 +826,12 @@ export default function App() {
     }, 1000);
   }, [status]);
 
+  const cancelTest = useCallback(() => {
+    if (testTimerRef.current) { clearInterval(testTimerRef.current); testTimerRef.current = null; }
+    isTestRecordingRef.current = false;
+    setTestPhase("idle");
+  }, []);
+
   const volumePct = dbToPercent(volumeDb);
   const peakPct = dbToPercent(peakDb);
   const snrRating = ratingLabel(snr);
@@ -860,6 +840,18 @@ export default function App() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {testPhase !== "idle" && (
+        <TestModal
+          phase={testPhase}
+          countdown={testCountdown}
+          progress={testProgress}
+          volumeDb={volumeDb}
+          result={testResult}
+          onClose={cancelTest}
+          onRetry={() => { cancelTest(); setTimeout(startTest, 100); }}
+        />
+      )}
 
       {/* Header */}
       <div style={{ borderBottom: `2px solid ${C.fg}`, paddingBottom: 16, marginBottom: 8 }}>
@@ -899,6 +891,48 @@ export default function App() {
         </div>
       ) : (
         <>
+          {/* Speech test trigger + history */}
+          <button
+            onClick={startTest}
+            style={{
+              padding: "13px",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              border: `2px solid ${C.fg}`,
+              background: C.fg,
+              color: C.bg,
+              cursor: "pointer",
+              fontFamily: MONO,
+              width: "100%",
+            }}
+          >
+            Run Speech Test
+          </button>
+
+          {testHistory.length > 0 && (
+            <Panel>
+              <div style={{ marginBottom: 10 }}>
+                <SectionLabel tooltip="Saved results from previous speech tests. Up to 20 results are stored in your browser.">Past Results</SectionLabel>
+              </div>
+              {testHistory.slice(0, 5).map((r) => {
+                const g = scoreGrade(r.score);
+                return (
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderTop: `1px solid ${C.dim2}` }}>
+                    <span style={{ fontSize: 10, color: C.dim, fontFamily: MONO }}>
+                      {new Date(r.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                      <span style={{ fontSize: 11, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: C.dim }}>{r.score}/100</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, fontFamily: SANS, color: g.color, minWidth: 16, textAlign: "center" }}>{g.grade}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </Panel>
+          )}
+
           {/* Signal Quality */}
           <Panel>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1114,17 +1148,6 @@ export default function App() {
             </div>
             <Spectrum dataRef={freqDataRef} sampleRateRef={sampleRateRef} />
           </Panel>
-
-          <SpeechTest
-            phase={testPhase}
-            countdown={testCountdown}
-            progress={testProgress}
-            volumeDb={volumeDb}
-            result={testResult}
-            history={testHistory}
-            onStart={startTest}
-            onReset={() => setTestPhase("idle")}
-          />
 
           <button
             onClick={stop}
