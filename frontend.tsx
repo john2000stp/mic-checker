@@ -52,6 +52,54 @@ function dynamicRangeLabel(dr: number): { label: string; color: string } {
   return          { label: "POOR",           color: C.red };
 }
 
+// ── Speech test helpers ───────────────────────────────────────────────────────
+
+const TEST_DURATION_MS = 10_000;
+const STORAGE_KEY = "mic-checker-results";
+
+type TestPhase = "idle" | "countdown" | "recording" | "done";
+
+type TestResult = {
+  id: string;
+  timestamp: number;
+  avgVolumeDb: number;
+  peakDb: number;
+  noiseFloorDb: number;
+  snr: number;
+  speechBandRatio: number;
+  dynamicRangeDb: number;
+  speechActivityPct: number;
+  clippingEvents: number;
+  score: number;
+  grade: string;
+};
+
+function computeTestScore(r: Pick<TestResult, "snr" | "speechBandRatio" | "dynamicRangeDb" | "noiseFloorDb">): number {
+  const snrPts   = Math.min(r.snr / 30, 1) * 40;
+  const bandPts  = Math.min(r.speechBandRatio / 0.7, 1) * 25;
+  const dynPts   = Math.min(r.dynamicRangeDb / 25, 1) * 20;
+  const noisePts = Math.min(Math.max(-r.noiseFloorDb - 20, 0) / 40, 1) * 15;
+  return Math.round(snrPts + bandPts + dynPts + noisePts);
+}
+
+function scoreGrade(score: number): { grade: string; label: string; color: string } {
+  if (score >= 80) return { grade: "A", label: "Dictation-ready", color: C.green };
+  if (score >= 60) return { grade: "B", label: "Good",            color: "#4a7c00" };
+  if (score >= 40) return { grade: "C", label: "Fair",            color: "#b35c00" };
+  if (score >= 20) return { grade: "D", label: "Poor",            color: C.red };
+  return                   { grade: "F", label: "Not suitable",   color: C.red };
+}
+
+function loadResults(): TestResult[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"); }
+  catch { return []; }
+}
+
+function saveResult(r: TestResult): void {
+  const all = loadResults();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([r, ...all].slice(0, 20)));
+}
+
 // ── Tooltip ──────────────────────────────────────────────────────────────────
 
 function InfoTooltip({ text, align = "center" }: { text: string; align?: TooltipAlign }) {
@@ -369,6 +417,161 @@ function Panel({ children, style }: { children: React.ReactNode; style?: React.C
   );
 }
 
+// ── Speech Test component ─────────────────────────────────────────────────────
+
+function SpeechTest({
+  phase, countdown, progress, volumeDb, result, history, onStart, onReset,
+}: {
+  phase: TestPhase;
+  countdown: number;
+  progress: number;
+  volumeDb: number;
+  result: TestResult | null;
+  history: TestResult[];
+  onStart: () => void;
+  onReset: () => void;
+}) {
+  const levelPct = dbToPercent(volumeDb);
+
+  if (phase === "countdown") {
+    return (
+      <Panel>
+        <div style={{ marginBottom: 14 }}>
+          <SectionLabel tooltip="A 10-second timed test that captures your mic metrics while you speak, then saves a scored result.">Speech Test</SectionLabel>
+        </div>
+        <div style={{ textAlign: "center", padding: "20px 0" }}>
+          <div style={{ fontSize: 80, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: C.yellow }}>{countdown}</div>
+          <div style={{ fontSize: 10, color: C.dim, marginTop: 10, fontFamily: MONO, letterSpacing: "0.25em" }}>GET READY TO SPEAK</div>
+        </div>
+      </Panel>
+    );
+  }
+
+  if (phase === "recording") {
+    return (
+      <Panel>
+        <div style={{ marginBottom: 14 }}>
+          <SectionLabel tooltip="Speak naturally for 10 seconds. The test captures SNR, speech band energy, dynamic range, and noise floor.">
+            Speech Test — Recording
+          </SectionLabel>
+        </div>
+        <div style={{ fontSize: 11, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginBottom: 12 }}>
+          Speak naturally in your normal voice...
+        </div>
+        <div style={{ height: 4, background: C.dim2, marginBottom: 10 }}>
+          <div style={{ height: "100%", width: `${progress}%`, background: C.yellow, transition: "width 0.05s" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, flexShrink: 0 }}>Level</div>
+          <div style={{ flex: 1, height: 8, background: C.dim2 }}>
+            <div style={{ height: "100%", width: `${levelPct}%`, background: C.fg, transition: "width 0.04s" }} />
+          </div>
+          <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, flexShrink: 0 }}>{Math.round(progress)}%</div>
+        </div>
+      </Panel>
+    );
+  }
+
+  if (phase === "done" && result) {
+    const g = scoreGrade(result.score);
+    const noiseRating = result.noiseFloorDb < -45 ? { label: "GOOD", color: C.green }
+      : result.noiseFloorDb < -35 ? { label: "FAIR", color: "#b35c00" }
+      : { label: "POOR", color: C.red };
+
+    const rows: { label: string; value: string; color: string }[] = [
+      { label: "SNR",           value: `${result.snr.toFixed(1)} dB`,                    color: ratingLabel(result.snr).color },
+      { label: "Speech Band",   value: `${(result.speechBandRatio * 100).toFixed(1)}%`,  color: speechBandLabel(result.speechBandRatio).color },
+      { label: "Dynamic Range", value: `${result.dynamicRangeDb.toFixed(1)} dB`,         color: dynamicRangeLabel(result.dynamicRangeDb).color },
+      { label: "Noise Floor",   value: `${result.noiseFloorDb.toFixed(1)} dB`,           color: noiseRating.color },
+      { label: "Speech Activity", value: `${result.speechActivityPct.toFixed(0)}%`,      color: C.dim },
+    ];
+
+    return (
+      <Panel>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <SectionLabel tooltip="Your mic's dictation readiness score, based on SNR, speech band energy, dynamic range, and noise floor.">
+            Speech Test Result
+          </SectionLabel>
+          <button
+            onClick={onReset}
+            style={{ fontFamily: MONO, fontSize: 10, border: `2px solid ${C.fg}`, padding: "4px 10px", background: "transparent", cursor: "pointer", letterSpacing: "0.1em", textTransform: "uppercase" }}
+          >
+            Test again
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginBottom: 16 }}>
+          <span style={{ fontSize: 72, fontWeight: 900, fontFamily: SANS, lineHeight: 1, color: g.color }}>{g.grade}</span>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: g.color, fontFamily: MONO }}>{result.score}<span style={{ fontSize: 11, fontWeight: 400 }}>/100</span></div>
+            <div style={{ fontSize: 11, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", marginTop: 2 }}>{g.label}</div>
+          </div>
+        </div>
+
+        {rows.map(({ label, value, color }) => (
+          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: `1px solid ${C.dim2}` }}>
+            <span style={{ fontSize: 10, color: C.dim, fontFamily: MONO, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</span>
+            <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+              <span style={{ fontSize: 12, fontFamily: MONO, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+              <span style={{ fontSize: 10, fontFamily: MONO, color, letterSpacing: "0.05em", minWidth: 52, textAlign: "right" }}>
+                {label === "Speech Activity" || label === "Noise Floor" ? "" : color === C.green ? "GOOD" : color === "#4a7c00" ? "GOOD" : color === "#b35c00" ? "FAIR" : "POOR"}
+              </span>
+            </div>
+          </div>
+        ))}
+
+        <div style={{ marginTop: 10, fontSize: 10, color: C.dim, fontFamily: MONO }}>
+          {new Date(result.timestamp).toLocaleString()}
+        </div>
+      </Panel>
+    );
+  }
+
+  // idle
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <button
+        onClick={onStart}
+        style={{
+          padding: "12px",
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: "0.15em",
+          textTransform: "uppercase",
+          border: `2px solid ${C.fg}`,
+          background: "transparent",
+          color: C.fg,
+          cursor: "pointer",
+          fontFamily: MONO,
+          width: "100%",
+        }}
+      >
+        Run Speech Test
+      </button>
+
+      {history.length > 0 && (
+        <Panel>
+          <div style={{ marginBottom: 10 }}>
+            <SectionLabel tooltip="Saved results from previous speech tests. Up to 20 results are stored in your browser.">Past Results</SectionLabel>
+          </div>
+          {history.slice(0, 5).map((r) => {
+            const g = scoreGrade(r.score);
+            return (
+              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderTop: `1px solid ${C.dim2}` }}>
+                <span style={{ fontSize: 10, color: C.dim, fontFamily: MONO }}>{new Date(r.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, fontFamily: MONO, fontVariantNumeric: "tabular-nums", color: C.dim }}>{r.score}/100</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, fontFamily: SANS, color: g.color, minWidth: 16, textAlign: "center" }}>{g.grade}</span>
+                </div>
+              </div>
+            );
+          })}
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -404,6 +607,16 @@ export default function App() {
   const silenceAccum = useRef({ sum: 0, count: 0 });
   const frameCountRef = useRef(0);
 
+  // Speech test
+  const [testPhase, setTestPhase] = useState<TestPhase>("idle");
+  const [testCountdown, setTestCountdown] = useState(3);
+  const [testProgress, setTestProgress] = useState(0);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [testHistory, setTestHistory] = useState<TestResult[]>([]);
+  const isTestRecordingRef = useRef(false);
+  const testTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const testDataRef = useRef<{ volumes: number[]; bandRatios: number[]; vadFrames: boolean[]; clipping: number }>({ volumes: [], bandRatios: [], vadFrames: [], clipping: 0 });
+
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -421,6 +634,9 @@ export default function App() {
     speechAccum.current = { sum: 0, count: 0 };
     silenceAccum.current = { sum: 0, count: 0 };
     frameCountRef.current = 0;
+    if (testTimerRef.current) { clearInterval(testTimerRef.current); testTimerRef.current = null; }
+    isTestRecordingRef.current = false;
+    setTestPhase("idle");
     setStatus("idle");
     setVolumeDb(-60);
     setPeakDb(-60);
@@ -530,6 +746,14 @@ export default function App() {
           const speaking = vadStateRef.current === "speaking";
           setIsSpeaking(speaking);
 
+          if (isTestRecordingRef.current) {
+            const ratio = totalEnergy > 0 ? speechEnergy / totalEnergy : 0;
+            testDataRef.current.volumes.push(clampedDb);
+            testDataRef.current.bandRatios.push(ratio);
+            testDataRef.current.vadFrames.push(speaking);
+            if (clampedDb > -1) testDataRef.current.clipping++;
+          }
+
           const hist = vadHistoryRef.current;
           hist.copyWithin(0, 1);
           hist[hist.length - 1] = speaking ? 1 : 0;
@@ -563,6 +787,70 @@ export default function App() {
   }, []);
 
   useEffect(() => () => stop(), []);
+  useEffect(() => { setTestHistory(loadResults()); }, []);
+
+  const startTest = useCallback(() => {
+    if (status !== "active") return;
+    testDataRef.current = { volumes: [], bandRatios: [], vadFrames: [], clipping: 0 };
+    setTestPhase("countdown");
+    setTestCountdown(3);
+    setTestResult(null);
+
+    let count = 3;
+    const countInterval = setInterval(() => {
+      count--;
+      setTestCountdown(count);
+      if (count > 0) return;
+      clearInterval(countInterval);
+
+      isTestRecordingRef.current = true;
+      setTestPhase("recording");
+      setTestProgress(0);
+
+      const startTime = Date.now();
+      testTimerRef.current = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const pct = Math.min((elapsed / TEST_DURATION_MS) * 100, 100);
+        setTestProgress(pct);
+        if (elapsed < TEST_DURATION_MS) return;
+
+        clearInterval(testTimerRef.current!);
+        testTimerRef.current = null;
+        isTestRecordingRef.current = false;
+
+        const { volumes, bandRatios, vadFrames, clipping } = testDataRef.current;
+        if (volumes.length < 10) { setTestPhase("idle"); return; }
+
+        const avgVolumeDb = volumes.reduce((a, b) => a + b, 0) / volumes.length;
+        const peakDb      = Math.max(...volumes);
+        const sortedVols  = [...volumes].sort((a, b) => a - b);
+        const floorSlice  = sortedVols.slice(0, Math.max(1, Math.ceil(sortedVols.length * 0.15)));
+        const noiseFloorDb = floorSlice.reduce((a, b) => a + b, 0) / floorSlice.length;
+        const snr          = Math.max(0, peakDb - noiseFloorDb);
+        const speechBandRatio = bandRatios.reduce((a, b) => a + b, 0) / bandRatios.length;
+        const speakingVols = volumes.filter((_, i) => vadFrames[i]);
+        const silentVols   = volumes.filter((_, i) => !vadFrames[i]);
+        const avgSpeaking  = speakingVols.length > 0 ? speakingVols.reduce((a, b) => a + b, 0) / speakingVols.length : avgVolumeDb;
+        const avgSilent    = silentVols.length   > 0 ? silentVols.reduce((a, b) => a + b, 0)   / silentVols.length   : noiseFloorDb;
+        const dynamicRangeDb   = Math.max(0, avgSpeaking - avgSilent);
+        const speechActivityPct = (vadFrames.filter(Boolean).length / vadFrames.length) * 100;
+
+        const score = computeTestScore({ snr, speechBandRatio, dynamicRangeDb, noiseFloorDb });
+        const { grade } = scoreGrade(score);
+
+        const result: TestResult = {
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          avgVolumeDb, peakDb, noiseFloorDb, snr, speechBandRatio,
+          dynamicRangeDb, speechActivityPct, clippingEvents: clipping, score, grade,
+        };
+        saveResult(result);
+        setTestResult(result);
+        setTestHistory(loadResults());
+        setTestPhase("done");
+      }, 50);
+    }, 1000);
+  }, [status]);
 
   const volumePct = dbToPercent(volumeDb);
   const peakPct = dbToPercent(peakDb);
@@ -826,6 +1114,17 @@ export default function App() {
             </div>
             <Spectrum dataRef={freqDataRef} sampleRateRef={sampleRateRef} />
           </Panel>
+
+          <SpeechTest
+            phase={testPhase}
+            countdown={testCountdown}
+            progress={testProgress}
+            volumeDb={volumeDb}
+            result={testResult}
+            history={testHistory}
+            onStart={startTest}
+            onReset={() => setTestPhase("idle")}
+          />
 
           <button
             onClick={stop}
