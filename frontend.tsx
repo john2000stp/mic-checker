@@ -52,6 +52,39 @@ function dynamicRangeLabel(dr: number): { label: string; color: string } {
   return          { label: "POOR",           color: C.red };
 }
 
+// ── Mic type detection ────────────────────────────────────────────────────────
+
+type MicType = "builtin" | "bluetooth" | "usb" | "wired" | "unknown";
+
+const MIC_META: Record<MicType, { label: string; color: string }> = {
+  builtin:   { label: "Built-in",  color: "#6B7280" },
+  bluetooth: { label: "Bluetooth", color: "#0055CC" },
+  usb:       { label: "USB",       color: "#1a6b1a" },
+  wired:     { label: "Wired",     color: "#4a7c00" },
+  unknown:   { label: "Unknown",   color: "#6B7280" },
+};
+
+function detectMicType(label: string, sampleRate: number): MicType {
+  // Bluetooth HSP/HFP profile drops to 8 kHz or 16 kHz — most reliable signal
+  if (sampleRate <= 16000) return "bluetooth";
+
+  const l = label.toLowerCase();
+
+  if (/bluetooth|airpod|beats|bose|sony|jabra|plantronics|sennheiser|galaxy.?bud|pixel.?bud|jbl|anker|soundcore|earbuds?|headphones?.+wireless|wireless.+headphones?/i.test(l))
+    return "bluetooth";
+
+  if (/built.?in|internal|macbook|imac|mac.?mini|surface|thinkpad|laptop|notebook|default/i.test(l))
+    return "builtin";
+
+  if (/usb|yeti|snowball|rode|nt-usb|shure|sm7|audio.technica|at2020|hyperx|logitech|elgato|fifine|samson|maono|focusrite|scarlett|behringer/i.test(l))
+    return "usb";
+
+  if (/headset|headphone|earphone|external|line.?in|analog|3\.5|jack|aux|microphone.+wired/i.test(l))
+    return "wired";
+
+  return "unknown";
+}
+
 // ── Speech test helpers ───────────────────────────────────────────────────────
 
 const TEST_DURATION_MS = 10_000;
@@ -581,6 +614,10 @@ export default function App() {
   const silenceAccum = useRef({ sum: 0, count: 0 });
   const frameCountRef = useRef(0);
 
+  // Mic detection
+  const [micLabel, setMicLabel] = useState("");
+  const [micType, setMicType] = useState<MicType>("unknown");
+
   // Speech test
   const [testPhase, setTestPhase] = useState<TestPhase>("idle");
   const [testCountdown, setTestCountdown] = useState(3);
@@ -621,6 +658,8 @@ export default function App() {
     setIsSpeaking(false);
     setSpeechDynamicRange(0);
     setHasEnoughVadData(false);
+    setMicLabel("");
+    setMicType("unknown");
   }, []);
 
   const start = useCallback(async () => {
@@ -633,6 +672,10 @@ export default function App() {
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
       sampleRateRef.current = ctx.sampleRate;
+
+      const trackLabel = stream.getAudioTracks()[0]?.label ?? "";
+      setMicLabel(trackLabel);
+      setMicType(detectMicType(trackLabel, ctx.sampleRate));
 
       const source = ctx.createMediaStreamSource(stream);
       const analyser = ctx.createAnalyser();
@@ -932,6 +975,48 @@ export default function App() {
               })}
             </Panel>
           )}
+
+          {/* Mic detection */}
+          <Panel>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 5 }}>
+                  Microphone
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, fontFamily: SANS, color: C.fg, maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {micLabel || "Unknown device"}
+                </div>
+                <div style={{ fontSize: 10, color: C.dim, fontFamily: MONO, marginTop: 4 }}>
+                  {sampleRateRef.current.toLocaleString()} Hz
+                </div>
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                <span style={{
+                  display: "inline-block",
+                  padding: "4px 10px",
+                  border: `2px solid ${MIC_META[micType].color}`,
+                  color: MIC_META[micType].color,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  fontFamily: MONO,
+                  letterSpacing: "0.15em",
+                  textTransform: "uppercase",
+                }}>
+                  {MIC_META[micType].label}
+                </span>
+              </div>
+            </div>
+            {micType === "bluetooth" && sampleRateRef.current <= 16000 && (
+              <div style={{ marginTop: 12, padding: "8px 10px", background: "#FFF3CD", border: "2px solid #b35c00", fontSize: 11, color: "#b35c00", fontFamily: MONO, letterSpacing: "0.05em" }}>
+                Bluetooth mic active at {sampleRateRef.current.toLocaleString()} Hz — too narrow for accurate dictation. Use a wired or USB mic for best results.
+              </div>
+            )}
+            {micType === "bluetooth" && sampleRateRef.current > 16000 && (
+              <div style={{ marginTop: 12, padding: "8px 10px", background: "#FFF3CD", border: "2px solid #b35c00", fontSize: 11, color: "#b35c00", fontFamily: MONO, letterSpacing: "0.05em" }}>
+                Bluetooth detected — mic quality depends on the headset profile in use. Audio may degrade if audio playback is active simultaneously.
+              </div>
+            )}
+          </Panel>
 
           {/* Signal Quality */}
           <Panel>
